@@ -438,8 +438,9 @@ if st.button("AIに診断してもらう"):
             # API設定
             genai.configure(api_key=user_api_key)
             
-            # モデル定義: 一般的な 'gemini-1.5-flash' を指定
-            model_name = 'gemini-1.5-flash'
+            # 【重要】ユーザーの利用可能リストにあった有効なモデル名を指定
+            # あなたのリストに 'models/gemini-2.0-flash' があるためこれを使います
+            model_name = 'gemini-2.0-flash'
             model = genai.GenerativeModel(model_name)
             
             prompt = f"""
@@ -482,7 +483,7 @@ if st.button("AIに診断してもらう"):
                 if available_models:
                     st.write("**現在利用可能なモデル名:**")
                     st.code("\n".join(available_models))
-                    st.write("もし 'gemini-1.5-flash' が含まれていない場合は、上記リストにある名前（例: 'models/gemini-1.5-flash-001' 等）をコード内の 'model_name' にコピーして修正してください。")
+                    st.write("もしエラーが続く場合は、上記リストにある名前をコード内の 'model_name' にコピーして修正してください。")
                 else:
                     st.warning("利用可能なモデルが見つかりませんでした。APIキーが正しいか確認してください。")
             except Exception as e2:
