@@ -436,7 +436,8 @@ if st.button("AIに診断してもらう"):
     else:
         try:
             genai.configure(api_key=user_api_key)
-            model = genai.GenerativeModel('gemini-2.0-flash')
+            # ここを gemini-2.0-flash から gemini-1.5-flash に変更しました
+            model = genai.GenerativeModel('gemini-1.5-flash')
             
             prompt = f"""
             あなたはプロのファイナンシャルプランナーです。以下のシミュレーション結果に基づき、辛口かつ具体的なアドバイスを日本語で作成してください。
