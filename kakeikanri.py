@@ -7,7 +7,7 @@ import datetime
 
 # --- ページ設定 ---
 st.set_page_config(
-    page_title="将来家計シミュレーション (決定版)",
+    page_title="将来家計シミュレーション (定年対応版)",
     layout="wide",
     initial_sidebar_state="expanded"
 )
@@ -35,7 +35,7 @@ def check_password():
 if not check_password():
     st.stop()
 
-# --- 定数データ (東京都市部・2025年版) ---
+# --- 定数データ ---
 EDUCATION_COSTS = {
     '【A】公立中心(塾しっかり)': [10, 10, 10, 25, 25, 25, 35, 35, 35, 40, 45, 50, 60, 60, 80, 60, 70, 90, 90, 55, 55, 55, 0],
     '【B】中高公立・私大文系': [10, 10, 10, 25, 25, 25, 35, 35, 35, 40, 45, 50, 60, 60, 80, 60, 70, 90, 135, 105, 105, 105, 0],
@@ -87,7 +87,7 @@ def get_boarding_cost(age, is_boarding, cost_per_year):
 # --- サイドバー設定 ---
 st.sidebar.title("🛠️ 条件設定")
 
-# 1. お子様・教育
+# 1. お子様・教育 (最優先)
 st.sidebar.header("👶 1. お子様・教育プラン")
 col1, col2 = st.sidebar.columns(2)
 with col1:
@@ -116,14 +116,25 @@ if c1_boarding or c2_boarding:
 else:
     boarding_cost_yearly = 0
 
-# 2. 収入・生活費
-st.sidebar.header("👛 2. 収入・生活費")
+# 2. 収入・生活費・定年
+st.sidebar.header("👛 2. 収入・定年設定")
 head_age = st.sidebar.number_input("世帯主 現在年齢", value=35, step=1)
 income_preset_key = st.sidebar.selectbox("世帯主収入シナリオ", list(INCOME_PRESETS.keys()), index=1)
 income_preset = INCOME_PRESETS[income_preset_key]
 head_income_base = st.sidebar.number_input("世帯主 現在年収 (万円)", value=income_preset['base'], step=10)
 head_income_growth = st.sidebar.number_input("世帯主 昇給率 (%/年)", value=income_preset['growth'], step=0.1)
-partner_income = st.sidebar.number_input("パートナー年収 (万円)", value=0, step=10)
+
+st.sidebar.markdown("##### 👴 定年・再雇用")
+retirement_age = st.sidebar.number_input("定年年齢", value=60, step=1, help="この年齢で給与がリセット(再雇用)されます")
+reemploy_ratio = st.sidebar.slider("再雇用時の年収掛目(%)", 30, 100, 60, help="定年直前の年収の何%になるか")
+retire_completely_age = st.sidebar.number_input("完全リタイア年齢", value=65, step=1, help="この年齢以降、労働収入は0になります")
+
+st.sidebar.markdown("##### 💴 年金")
+pension_start_age = st.sidebar.number_input("年金受給開始年齢", value=65, step=1)
+pension_amount = st.sidebar.number_input("世帯の年金受給額(年額)", value=240, step=10, help="夫婦2人の標準的な受給額目安: 230~260万円")
+
+st.sidebar.markdown("---")
+partner_income = st.sidebar.number_input("パートナー現在年収 (万円)", value=0, step=10, help="パートナーは現状一定として計算されます")
 
 st.sidebar.markdown("---")
 living_preset_key = st.sidebar.selectbox("生活費 (住居費別)", list(LIVING_PRESETS.keys()), index=1)
@@ -147,7 +158,7 @@ mortgage_rate_scenario = MORTGAGE_RATE_SCENARIOS[st.sidebar.selectbox("金利変
 # 4. 資産・運用
 st.sidebar.header("💰 4. 資産・iDeCo")
 initial_cash = st.sidebar.number_input("現在の貯金 (万円)", value=380, step=10)
-safety_net_val = st.sidebar.number_input("生活防衛資金 (万円)", value=300, step=10, help="この金額は投資に回さず、現金として確保します。現金がこれを下回ると、投資を取り崩して補充します。")
+safety_net_val = st.sidebar.number_input("生活防衛資金 (万円)", value=300, step=10, help="この金額は投資に回さず、現金として確保します。")
 initial_invest = st.sidebar.number_input("現在の投資 (万円)", value=1820, step=10)
 invest_yield = st.sidebar.number_input("投資(NISA) 年利回り (%)", value=3.0, step=0.1)
 invest_surplus = st.sidebar.checkbox("生活防衛資金を超える黒字を投資に回す", value=True)
@@ -161,7 +172,7 @@ ideco_yield = st.sidebar.number_input("iDeCo 年利回り (%)", value=3.0, step=
 start_year = 2025
 last_child_grad_year = c1_year + 23
 if has_child2: last_child_grad_year = max(last_child_grad_year, c2_year + 23)
-end_year = max(start_year + 35, last_child_grad_year) 
+end_year = max(start_year + 45, last_child_grad_year) # 老後まで見たいので期間延長
 years = list(range(start_year, end_year + 1))
 
 df = pd.DataFrame(index=years)
@@ -171,9 +182,39 @@ df['世帯主年齢'] = head_age + df['経過年数']
 df['第1子年齢'] = df['西暦'] - c1_year
 df['第2子年齢'] = (df['西暦'] - c2_year) if has_child2 else np.nan
 
-# 収入
-df['世帯主収入'] = head_income_base * (1 + head_income_growth / 100) ** df['経過年数']
-df['世帯収入'] = df['世帯主収入'] + partner_income
+# --- 収入計算ロジック(定年対応) ---
+head_incomes = []
+pension_incomes = []
+peak_income = 0 # 定年直前の年収を記録
+
+for i, year in enumerate(years):
+    age = df['世帯主年齢'].iloc[i]
+    
+    # 1. 現役期間 (定年前)
+    if age < retirement_age:
+        inc = head_income_base * (1 + head_income_growth / 100) ** i
+        head_incomes.append(inc)
+        peak_income = inc # 更新し続ける
+    
+    # 2. 再雇用期間 (定年〜完全リタイアまで)
+    elif age < retire_completely_age:
+        # 定年直前の年収 × 再雇用率
+        inc = peak_income * (reemploy_ratio / 100)
+        head_incomes.append(inc)
+        
+    # 3. 完全リタイア後
+    else:
+        head_incomes.append(0)
+
+    # 年金
+    if age >= pension_start_age:
+        pension_incomes.append(pension_amount)
+    else:
+        pension_incomes.append(0)
+
+df['世帯主労働収入'] = head_incomes
+df['年金収入'] = pension_incomes
+df['世帯収入'] = df['世帯主労働収入'] + partner_income + df['年金収入']
 
 # 支出
 df['教育費'] = df['第1子年齢'].apply(lambda x: get_cost(x, EDUCATION_COSTS[c1_edu]))
@@ -256,23 +297,19 @@ for i, year in enumerate(years):
     
     current_cash += cash_flow
     
-    # --- 生活防衛資金ロジック ---
+    # 生活防衛資金ロジック
     if current_cash < safety_net_amount:
-        # 現金が防衛資金を割った場合、投資から補充
         deficit = safety_net_amount - current_cash
         if current_invest >= deficit:
             current_invest -= deficit
-            current_cash += deficit # これでsafety_net_amountに戻る
+            current_cash += deficit
         else:
-            # 投資を全額解約しても足りない場合
             current_cash += current_invest
             current_invest = 0
-            # それでも0未満なら破綻
             if current_cash < 0 and bankrupt_year is None:
                 bankrupt_year = year
                 
     elif current_cash > safety_net_amount and invest_surplus:
-        # 現金が防衛資金を超えている場合、余剰を投資へ
         surplus = current_cash - safety_net_amount
         current_cash = safety_net_amount
         current_invest += surplus
@@ -301,7 +338,7 @@ df['教育・養育・仕送り'] = df['教育費'] + df['養育費'] + df['仕�
 
 # --- 表示 ---
 st.title("将来家計シミュレーション 📊")
-st.markdown("お子様の教育費と、将来の老後資金の安全性を確認します。")
+st.markdown("定年後の収入減や年金を考慮し、教育費ピークと老後資金の安全性を確認します。")
 
 # KPI
 total_child_cost = df['教育・養育・仕送り'].sum()
@@ -360,7 +397,6 @@ with st.expander("詳細データを見る"):
 
 # 参考データ表示
 st.markdown("### 【参考】教育費・養育費の前提データ (年額: 万円)")
-st.caption("詳細データの下に表示しています。ご自身のプランに合わせてサイドバーで編集可能です。")
 col_ref1, col_ref2 = st.columns(2)
 with col_ref1:
     st.markdown("**🎓 教育費 (学費+塾代等)**")
@@ -390,7 +426,7 @@ if st.button("家計診断を実行する") and user_api_key:
         あなたは優秀なFPです。以下のシミュレーション結果に基づき、アドバイスしてください。
 
         # ユーザー属性
-        - 世帯主: {head_age}歳, 現在年収{head_income_base}万
+        - 世帯主: {head_age}歳, 年収{head_income_base}万 (定年{retirement_age}歳/再雇用率{reemploy_ratio}%)
         - 子供: 第1子{c1_year}年生まれ({c1_edu}) / 仕送り{boarding_status}
         - 現在資産: 貯金{initial_cash}万 (防衛資金{safety_net_val}万設定), 投資{initial_invest}万, iDeCo{initial_ideco}万
 
@@ -400,8 +436,8 @@ if st.button("家計診断を実行する") and user_api_key:
         - 老後純資産(最終): {final_net_assets:,.0f}万円
         
         # アドバイスのポイント
-        1. 教育費ピーク時の資金繰りと、投資取り崩しの有無について
-        2. 老後資金の十分性
+        1. 定年後の収入減と教育費負担の重なりについて
+        2. 老後資金の十分性（年金生活への移行）
         3. 生活防衛資金の設定額は適切か
         
         簡潔に3点にまとめてください。
