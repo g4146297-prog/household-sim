@@ -84,10 +84,10 @@ def get_boarding_cost(age, is_boarding, cost_per_year):
     if is_boarding and (18 <= age <= 21): return cost_per_year
     return 0
 
-# --- サイドバー設定 (操作順序を最適化) ---
+# --- サイドバー設定 ---
 st.sidebar.title("🛠️ 条件設定")
 
-# 1. お子様・教育 (最優先)
+# 1. お子様・教育
 st.sidebar.header("👶 1. お子様・教育プラン")
 col1, col2 = st.sidebar.columns(2)
 with col1:
@@ -144,12 +144,13 @@ mortgage_base_rate = st.sidebar.number_input("基準金利 (%)", value=2.841, st
 mortgage_reduction_rate = st.sidebar.number_input("引下幅 (%)", value=2.057, step=0.001, format="%.3f")
 mortgage_rate_scenario = MORTGAGE_RATE_SCENARIOS[st.sidebar.selectbox("金利変動シナリオ", list(MORTGAGE_RATE_SCENARIOS.keys()))]
 
-# 4. 資産・運用 (詳細は下部に)
-st.sidebar.header("💰 4. 現在資産・iDeCo")
+# 4. 資産・運用
+st.sidebar.header("💰 4. 資産・iDeCo")
 initial_cash = st.sidebar.number_input("現在の貯金 (万円)", value=380, step=10)
+safety_net_val = st.sidebar.number_input("生活防衛資金 (万円)", value=300, step=10, help="この金額は投資に回さず、現金として確保します。現金がこれを下回ると、投資を取り崩して補充します。")
 initial_invest = st.sidebar.number_input("現在の投資 (万円)", value=1820, step=10)
 invest_yield = st.sidebar.number_input("投資(NISA) 年利回り (%)", value=3.0, step=0.1)
-invest_surplus = st.sidebar.checkbox("毎年の黒字分を投資に回す", value=True)
+invest_surplus = st.sidebar.checkbox("生活防衛資金を超える黒字を投資に回す", value=True)
 
 st.sidebar.markdown("---")
 initial_ideco = st.sidebar.number_input("iDeCo残高 (万円)", value=180, step=10)
@@ -193,6 +194,7 @@ current_invest = initial_invest * 10000
 current_ideco = initial_ideco * 10000
 current_loan_balance = mortgage_principal * 10000
 current_base_rate = mortgage_base_rate
+safety_net_amount = safety_net_val * 10000
 
 # ローン初期計算
 months_before = max(0, (start_year - mortgage_start_year) * 12 + 3)
@@ -217,7 +219,7 @@ min_assets_val = float('inf')
 min_assets_year = start_year
 
 for i, year in enumerate(years):
-    # iDeCo (60歳まで)
+    # iDeCo
     age = df['世帯主年齢'].iloc[i]
     ideco_add = 0
     if age < 60:
@@ -247,29 +249,35 @@ for i, year in enumerate(years):
     income = df['世帯収入'].iloc[i] * 10000
     spending = df['支出計(ローン除)'].iloc[i] * 10000 + annual_payment
     cash_flow = income - spending - ideco_add
-    current_cash += cash_flow
     
-    # 投資計算
+    # 資産計算 (順序: 投資利回り -> 現金増減 -> リバランス)
     invest_gain = current_invest * (invest_yield / 100)
     current_invest += invest_gain
     
-    if current_cash < 0:
-        shortfall = -current_cash
-        current_cash = 0
-        if current_invest >= shortfall:
-            current_invest -= shortfall
+    current_cash += cash_flow
+    
+    # --- 生活防衛資金ロジック ---
+    if current_cash < safety_net_amount:
+        # 現金が防衛資金を割った場合、投資から補充
+        deficit = safety_net_amount - current_cash
+        if current_invest >= deficit:
+            current_invest -= deficit
+            current_cash += deficit # これでsafety_net_amountに戻る
         else:
+            # 投資を全額解約しても足りない場合
+            current_cash += current_invest
             current_invest = 0
-            current_cash = - (shortfall - current_invest) 
-            if bankrupt_year is None: bankrupt_year = year
-    elif current_cash > 3000000 and invest_surplus:
-        surplus = current_cash - 3000000
-        current_cash = 3000000
+            # それでも0未満なら破綻
+            if current_cash < 0 and bankrupt_year is None:
+                bankrupt_year = year
+                
+    elif current_cash > safety_net_amount and invest_surplus:
+        # 現金が防衛資金を超えている場合、余剰を投資へ
+        surplus = current_cash - safety_net_amount
+        current_cash = safety_net_amount
         current_invest += surplus
 
     total_assets = current_cash + current_invest + current_ideco
-    
-    # 資産最小値の更新 (破綻していない場合のみ、あるいは借金も含めて)
     if total_assets < min_assets_val:
         min_assets_val = total_assets
         min_assets_year = year
@@ -291,88 +299,55 @@ df['総資産'] = df['貯金'] + df['投資'] + df['iDeCo']
 df['純資産'] = df['総資産'] - df['ローン残高']
 df['教育・養育・仕送り'] = df['教育費'] + df['養育費'] + df['仕送り']
 
-# --- メインコンテンツ ---
+# --- 表示 ---
 st.title("将来家計シミュレーション 📊")
 st.markdown("お子様の教育費と、将来の老後資金の安全性を確認します。")
 
-# 重要指標 (KPI)
+# KPI
 total_child_cost = df['教育・養育・仕送り'].sum()
 final_net_assets = df['純資産'].iloc[-1]
 min_assets_disp = df.loc[df['西暦'] == min_assets_year, '総資産'].values[0]
 
 col1, col2, col3 = st.columns(3)
-
 with col1:
-    st.metric(
-        label="👶 教育・養育費の総額",
-        value=f"{total_child_cost:,.0f} 万円",
-        delta="仕送り含む" if (c1_boarding or c2_boarding) else "自宅通学"
-    )
-
+    st.metric("👶 教育・養育費の総額", f"{total_child_cost:,.0f} 万円", "仕送り含む" if (c1_boarding or c2_boarding) else "自宅通学")
 with col2:
     if bankrupt_year:
         st.error(f"⚠️ {bankrupt_year}年に資金ショート")
     else:
-        # 安全性の判定
-        is_safe = min_assets_disp > 300 # 300万以上あれば安全圏と仮定
+        is_safe = min_assets_disp > safety_net_val
         color = "normal" if is_safe else "off"
-        st.metric(
-            label="📉 最も家計が苦しくなる時期",
-            value=f"{min_assets_year}年",
-            delta=f"残高 {min_assets_disp:,.0f} 万円",
-            delta_color=color
-        )
-
+        st.metric("📉 最も家計が苦しくなる時期", f"{min_assets_year}年", f"残高 {min_assets_disp:,.0f} 万円", delta_color=color)
 with col3:
-    st.metric(
-        label="👴 老後時点の純資産 (ローン完済後)",
-        value=f"{final_net_assets:,.0f} 万円",
-        help="iDeCo、NISA、貯金の合計からローン残高を引いた額"
-    )
+    st.metric("👴 老後時点の純資産 (ローン完済後)", f"{final_net_assets:,.0f} 万円")
 
 # グラフ
 st.subheader("📈 資産推移シミュレーション")
-st.caption("太い青線（総資産）が赤点線（ローン残高）を上回っている状態を維持することが目標です。")
+st.caption("マウスを合わせると、年齢と金額(万円)が確認できます。")
 
 fig = go.Figure()
+fig.add_trace(go.Scatter(x=df['西暦'], y=df['総資産'], name='<b>総資産</b>', line=dict(color='#2563eb', width=4), hovertemplate='%{y:,.0f}万円'))
+fig.add_trace(go.Scatter(x=df['西暦'], y=df['投資'], name='うち投資(NISA)', line=dict(color='#10b981', width=1), stackgroup='one', hovertemplate='%{y:,.0f}万円'))
+fig.add_trace(go.Scatter(x=df['西暦'], y=df['iDeCo'], name='うちiDeCo', line=dict(color='#f59e0b', width=1), stackgroup='one', hovertemplate='%{y:,.0f}万円'))
+fig.add_trace(go.Scatter(x=df['西暦'], y=df['貯金'], name='うち貯金', line=dict(color='#93c5fd', width=1), stackgroup='one', hovertemplate='%{y:,.0f}万円'))
+fig.add_trace(go.Scatter(x=df['西暦'], y=df['ローン残高'], name='ローン残高', line=dict(color='#ef4444', dash='dot', width=2), hovertemplate='%{y:,.0f}万円'))
 
-# 構成要素を積み上げ面グラフ風に見せるか、単に線を引くか。ここでは見やすさ重視でライン。
-fig.add_trace(go.Scatter(
-    x=df['西暦'], y=df['総資産'], 
-    name='<b>総資産 (貯金+投資+iDeCo)</b>', 
-    line=dict(color='#2563eb', width=4), # 強調
-    hovertemplate='%{y:,.0f}万円'
-))
-
-fig.add_trace(go.Scatter(
-    x=df['西暦'], y=df['投資'], 
-    name='うち投資(NISA)', 
-    line=dict(color='#10b981', width=1),
-    stackgroup='one' # 積み上げ表示
-))
-fig.add_trace(go.Scatter(
-    x=df['西暦'], y=df['iDeCo'], 
-    name='うちiDeCo', 
-    line=dict(color='#f59e0b', width=1),
-    stackgroup='one'
-))
-fig.add_trace(go.Scatter(
-    x=df['西暦'], y=df['貯金'], 
-    name='うち貯金', 
-    line=dict(color='#93c5fd', width=1),
-    stackgroup='one'
-))
-
-# ローンは別軸的に表示
-fig.add_trace(go.Scatter(
-    x=df['西暦'], y=df['ローン残高'], 
-    name='ローン残高', 
-    line=dict(color='#ef4444', dash='dot', width=2)
-))
+# X軸のラベル作成 (5年ごと、年齢表示)
+tick_vals = []
+tick_text = []
+for index, row in df.iterrows():
+    if (row['西暦'] - start_year) % 5 == 0:
+        tick_vals.append(row['西暦'])
+        tick_text.append(f"{row['西暦']}<br>(主{int(row['世帯主年齢'])}/子{int(row['第1子年齢'])})")
 
 fig.update_layout(
-    xaxis_title="西暦", 
-    yaxis_title="金額 (万円)", 
+    xaxis=dict(
+        title="西暦 (世帯主年齢/第1子年齢)",
+        tickmode='array',
+        tickvals=tick_vals,
+        ticktext=tick_text
+    ),
+    yaxis_title="金額 (万円)",
     hovermode="x unified",
     legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
 )
@@ -380,8 +355,23 @@ st.plotly_chart(fig, use_container_width=True)
 
 # データテーブル
 with st.expander("詳細データを見る"):
-    display_cols = ['西暦', '世帯主年齢', '第1子年齢', '世帯収入', '教育・養育・仕送り', '生活費(インフレ込)', 'ローン返済', '年間収支', '総資産']
+    display_cols = ['西暦', '世帯主年齢', '第1子年齢', '世帯収入', '教育・養育・仕送り', '年間収支', '総資産', '貯金', '投資', 'ローン残高']
     st.dataframe(df[display_cols].style.format("{:,.0f}"), use_container_width=True)
+
+# 参考データ表示
+st.markdown("### 【参考】教育費・養育費の前提データ (年額: 万円)")
+st.caption("詳細データの下に表示しています。ご自身のプランに合わせてサイドバーで編集可能です。")
+col_ref1, col_ref2 = st.columns(2)
+with col_ref1:
+    st.markdown("**🎓 教育費 (学費+塾代等)**")
+    df_edu_ref = pd.DataFrame(EDUCATION_COSTS).T
+    df_edu_ref.columns = [f"{i}歳" for i in range(23)]
+    st.dataframe(df_edu_ref)
+with col_ref2:
+    st.markdown("**🍼 養育費 (食費・衣服・小遣い等)**")
+    df_rear_ref = pd.DataFrame(REARING_COSTS).T
+    df_rear_ref.columns = [f"{i}歳" for i in range(23)]
+    st.dataframe(df_rear_ref)
 
 # AI診断
 st.markdown("---")
@@ -397,23 +387,22 @@ if st.button("家計診断を実行する") and user_api_key:
         if c1_boarding or c2_boarding: boarding_status = f"あり(年{boarding_cost_yearly}万)"
         
         prompt = f"""
-        あなたは優秀なFPです。以下のシミュレーション結果に基づき、ユーザーの「教育費」と「老後資金」のバランスについてアドバイスしてください。
+        あなたは優秀なFPです。以下のシミュレーション結果に基づき、アドバイスしてください。
 
         # ユーザー属性
         - 世帯主: {head_age}歳, 現在年収{head_income_base}万
         - 子供: 第1子{c1_year}年生まれ({c1_edu}) / 仕送り{boarding_status}
-        - 現在資産: 貯金{initial_cash}万, 投資{initial_invest}万, iDeCo{initial_ideco}万
+        - 現在資産: 貯金{initial_cash}万 (防衛資金{safety_net_val}万設定), 投資{initial_invest}万, iDeCo{initial_ideco}万
 
         # シミュレーション結果
         - 教育・養育費総額: {total_child_cost:,.0f}万円
         - 最も苦しい時期: {min_assets_year}年 (資産残高 {min_assets_disp:,.0f}万円)
         - 老後純資産(最終): {final_net_assets:,.0f}万円
-        - 破綻: {'あり' if bankrupt_year else 'なし'}
-
+        
         # アドバイスのポイント
-        1. 教育費のピーク時に家計が持ちこたえられるか？
-        2. 教育費をかけすぎた結果、老後資金が不足していないか？
-        3. iDeCoやNISAの活用バランスは適切か？
+        1. 教育費ピーク時の資金繰りと、投資取り崩しの有無について
+        2. 老後資金の十分性
+        3. 生活防衛資金の設定額は適切か
         
         簡潔に3点にまとめてください。
         """
