@@ -438,9 +438,9 @@ if st.button("AIに診断してもらう"):
             # API設定
             genai.configure(api_key=user_api_key)
             
-            # 【重要】ユーザーの利用可能リストにあった有効なモデル名を指定
-            # あなたのリストに 'models/gemini-2.0-flash' があるためこれを使います
-            model_name = 'gemini-2.0-flash'
+            # 【重要】リストにある 'gemini-flash-latest' を使用します
+            # これは通常、安定版のFlashモデルを指し、エラーが出にくいです
+            model_name = 'gemini-flash-latest'
             model = genai.GenerativeModel(model_name)
             
             prompt = f"""
