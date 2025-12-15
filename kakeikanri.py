@@ -15,32 +15,38 @@ st.set_page_config(
 # --- パスワード認証機能 ---
 def check_password():
     """パスワード認証を行う関数"""
+    # secretsにパスワードが設定されていない場合は認証をスキップ（ローカル開発用など）
     if "password" not in st.secrets:
         return True
 
     def password_entered():
+        """パスワード入力時のチェック"""
         if st.session_state["password"] == st.secrets["password"]:
             st.session_state["password_correct"] = True
-            del st.session_state["password"]
+            del st.session_state["password"]  # パスワードをセッションから削除
         else:
             st.session_state["password_correct"] = False
 
     if "password_correct" not in st.session_state:
+        # 初回アクセス時: パスワード入力フォームを表示
         st.text_input(
             "パスワードを入力してください", type="password", on_change=password_entered, key="password"
         )
         return False
     elif not st.session_state["password_correct"]:
+        # パスワード間違い時
         st.text_input(
             "パスワードを入力してください", type="password", on_change=password_entered, key="password"
         )
         st.error("パスワードが間違っています")
         return False
     else:
+        # 認証成功時
         return True
 
+# 認証チェック実行
 if not check_password():
-    st.stop()
+    st.stop()  # 認証失敗または未入力時はここで処理を止める
 
 # --- 以下、メインアプリケーション ---
 
@@ -95,10 +101,11 @@ MORTGAGE_RATE_SCENARIOS = {
 # --- 関数定義 ---
 
 def get_rate_fluctuation(scenario, current_base_rate):
+    """金利変動シナリオに基づく翌年の金利を計算"""
     if scenario == 'fixed':
         return current_base_rate
     elif scenario == 'stable':
-        return current_base_rate + (np.random.random() - 0.45) * 0.05
+        return current_base_rate + (np.random.random() - 0.45) * 0.05 # 微減傾向のランダム
     elif scenario == 'rising':
         return current_base_rate + 0.05
     elif scenario == 'sharp_rising':
@@ -176,36 +183,44 @@ mortgage_rate_scenario_key = st.sidebar.selectbox("金利変動シナリオ", li
 mortgage_rate_scenario = MORTGAGE_RATE_SCENARIOS[mortgage_rate_scenario_key]
 
 # --- シミュレーション実行ロジック ---
+
+# シミュレーション期間の設定
 start_year = 2025
 current_year = datetime.datetime.now().year
 last_child_grad_year = c1_year + 23
 if has_child2:
     last_child_grad_year = max(last_child_grad_year, c2_year + 23)
 
-end_year = max(start_year + 30, last_child_grad_year)
+end_year = max(start_year + 30, last_child_grad_year) # 少なくとも30年、または末子卒業まで
 years = list(range(start_year, end_year + 1))
 
+# データフレームの準備
 df = pd.DataFrame(index=years)
 df['西暦'] = df.index
 df['経過年数'] = df['西暦'] - start_year
 
+# 年齢計算
 df['第1子年齢'] = df['西暦'] - c1_year
 if has_child2:
     df['第2子年齢'] = df['西暦'] - c2_year
 else:
     df['第2子年齢'] = np.nan
 
+# 収入計算
 df['世帯主収入'] = head_income_base * (1 + head_income_growth / 100) ** df['経過年数']
 df['世帯収入'] = df['世帯主収入'] + partner_income
 
+# 教育費・養育費計算
 def get_cost(age, cost_list):
     if 0 <= age < len(cost_list):
         return cost_list[age]
     return 0
 
+# シナリオデータの編集機能 (Data Editor)
 st.title("将来家計シミュレーション 📊")
 
 with st.expander("教育費・養育費データの編集 (詳細設定)", expanded=False):
+    # 辞書をDataFrameに変換して編集可能にする
     df_edu = pd.DataFrame(EDUCATION_COSTS).T
     df_edu.columns = [f"{i}歳" for i in range(23)]
     edited_edu = st.data_editor(df_edu, use_container_width=True)
@@ -214,6 +229,7 @@ with st.expander("教育費・養育費データの編集 (詳細設定)", expan
     df_rear.columns = [f"{i}歳" for i in range(23)]
     edited_rear = st.data_editor(df_rear, use_container_width=True)
 
+# 編集後のデータを使用してコスト計算
 df['第1子教育費'] = df['第1子年齢'].apply(lambda x: get_cost(x, edited_edu.loc[c1_edu].tolist()) if x >= 0 else 0)
 df['第1子養育費'] = df['第1子年齢'].apply(lambda x: get_cost(x, edited_rear.loc[c1_rear].tolist()) if x >= 0 else 0)
 
@@ -228,25 +244,31 @@ df['教育費合計'] = df['第1子教育費'] + df['第2子教育費']
 df['養育費合計'] = df['第1子養育費'] + df['第2子養育費']
 df['教育・養育費小計'] = df['教育費合計'] + df['養育費合計']
 
+# 生活費 (インフレ考慮)
 df['生活費'] = living_cost_base * (1 + inflation_rate) ** df['経過年数']
 
+# 住宅ローン計算 (年次進行)
 df['基準金利'] = mortgage_base_rate
+# 金利変動シミュレーション
 current_base_rate = mortgage_base_rate
 rate_history = []
 for _ in years:
-    if len(rate_history) > 0:
+    if len(rate_history) > 0: # 初年度以降
         current_base_rate = get_rate_fluctuation(mortgage_rate_scenario, current_base_rate)
     rate_history.append(current_base_rate)
 df['基準金利'] = rate_history
-df['適用金利'] = (df['基準金利'] - mortgage_reduction_rate).clip(lower=0)
+df['適用金利'] = (df['基準金利'] - mortgage_reduction_rate).clip(lower=0) # マイナス金利防止
 
+# ローン残高・返済額の推移計算
 loan_balances = []
 loan_payments = []
-current_loan_balance = mortgage_principal * 10000
+current_loan_balance = mortgage_principal * 10000 # 円単位
 remaining_loan_years = mortgage_end_year - mortgage_start_year
 
-months_before_sim = max(0, (start_year - mortgage_start_year) * 12 + (4 - 1))
+# シミュレーション開始前までの経過期間を計算
+months_before_sim = max(0, (start_year - mortgage_start_year) * 12 + (4 - 1)) # 2025年4月基準
 
+# 開始前までの残高減少を簡易計算 (初年度金利で計算)
 initial_monthly_rate = (mortgage_base_rate - mortgage_reduction_rate) / 100 / 12
 initial_monthly_payment = 0
 if remaining_loan_years > 0:
@@ -255,6 +277,7 @@ if remaining_loan_years > 0:
     else:
          initial_monthly_payment = current_loan_balance / (remaining_loan_years*12)
 
+# シミュレーション開始時点の残高を推計
 for _ in range(months_before_sim):
     if current_loan_balance > 0:
         interest = current_loan_balance * initial_monthly_rate
@@ -262,6 +285,7 @@ for _ in range(months_before_sim):
         current_loan_balance -= principal_paid
 current_loan_balance = max(0, current_loan_balance)
 
+# 年次ループ計算
 current_cash = initial_cash * 10000
 current_invest = initial_invest * 10000
 current_ideco = initial_ideco * 10000
@@ -273,6 +297,8 @@ ideco_history = []
 bankrupt_year = None
 
 for i, year in enumerate(years):
+    # --- ローン ---
+    # 毎年、残り期間と現在金利で返済額を再計算 (簡易変動金利モデル)
     years_left = max(0, mortgage_end_year - year)
     months_left = years_left * 12
     annual_payment = 0
@@ -284,6 +310,7 @@ for i, year in enumerate(years):
         else:
             monthly_p = current_loan_balance / months_left
             
+        # 1年分 (12ヶ月) の返済
         for _ in range(12):
             if current_loan_balance <= 0: break
             interest = current_loan_balance * monthly_r
@@ -292,30 +319,38 @@ for i, year in enumerate(years):
             annual_payment += monthly_p
     
     current_loan_balance = max(0, current_loan_balance)
-    loan_balances.append(current_loan_balance / 10000)
-    loan_payments.append(annual_payment / 10000)
+    loan_balances.append(current_loan_balance / 10000) # 万円
+    loan_payments.append(annual_payment / 10000) # 万円
 
+    # --- 資産運用 ---
+    # 投資リターン
     invest_ret = current_invest * (invest_yield / 100)
     current_invest += invest_ret
     
+    # iDeCoリターン + 拠出
     ideco_contribution = ideco_monthly * 10000 * 12
-    ideco_ret = (current_ideco + ideco_contribution) * (ideco_yield / 100)
+    ideco_ret = (current_ideco + ideco_contribution) * (ideco_yield / 100) # 簡易的に期初+拠出分に利回り適用
     current_ideco += ideco_contribution + ideco_ret
 
+    # --- 収支 ---
     income_val = df['世帯収入'].iloc[i] * 10000
     spending_val = (df['教育費合計'].iloc[i] + df['養育費合計'].iloc[i] + df['生活費'].iloc[i]) * 10000 + annual_payment
     
+    # iDeCo拠出は手取り収入から引く支出扱いではなく、資産移転だが、
+    # ここではキャッシュフロー計算上、手元現金から出ていくものとして扱う
     cash_flow = income_val - spending_val - ideco_contribution
     
     current_cash += cash_flow
     
+    # --- 資産取り崩しロジック ---
     if current_cash < 0:
         shortfall = -current_cash
         if current_invest >= shortfall:
             current_invest -= shortfall
             current_cash = 0
         else:
-            current_cash += current_invest
+            # 投資でも足りない -> 破綻 (貯金マイナス)
+            current_cash += current_invest # 全額充当
             current_invest = 0
             if bankrupt_year is None:
                 bankrupt_year = year
@@ -325,6 +360,7 @@ for i, year in enumerate(years):
     ideco_history.append(current_ideco / 10000)
     asset_history.append((current_cash + current_invest + current_ideco) / 10000)
 
+
 df['ローン返済'] = loan_payments
 df['ローン残高'] = loan_balances
 df['貯金'] = cash_history
@@ -332,11 +368,15 @@ df['投資'] = invest_history
 df['iDeCo'] = ideco_history
 df['総資産'] = df['貯金'] + df['投資'] + df['iDeCo']
 df['貯金+投資'] = df['貯金'] + df['投資']
-df['収支'] = df['世帯収入'] - (df['教育・養育費小計'] + df['生活費'] + df['ローン返済'])
+df['収支'] = df['世帯収入'] - (df['教育・養育費小計'] + df['生活費'] + df['ローン返済']) # iDeCo拠出は除く(貯蓄性のため)
 
+# --- 結果表示 ---
+
+# アラート表示
 if bankrupt_year:
     st.error(f"⚠️ **家計破綻の警告**: {bankrupt_year}年（第1子 {bankrupt_year - c1_year}歳）に資金（貯金＋投資）が底をつきます。")
 
+# サマリーカード
 col_s1, col_s2, col_s3 = st.columns(3)
 with col_s1:
     total_edu_rear = df['教育・養育費小計'].sum()
@@ -352,7 +392,10 @@ with col_s3:
     final_net_asset = final_val['総資産'] - final_val['ローン残高']
     st.metric("最終時点の純資産", f"{final_net_asset:,.0f} 万円", f"総資産: {final_val['総資産']:,.0f} - ローン: {final_val['ローン残高']:,.0f}")
 
+# グラフ
 st.subheader("📊 資産状況の推移")
+
+# 表示項目の選択
 show_options = st.multiselect(
     "グラフに表示する項目を選択:",
     ['総資産', 'ローン残高', '貯金+投資', 'iDeCo'],
@@ -360,6 +403,7 @@ show_options = st.multiselect(
 )
 
 fig = go.Figure()
+
 if '総資産' in show_options:
     fig.add_trace(go.Scatter(x=df['西暦'], y=df['総資産'], mode='lines', name='総資産', line=dict(color='#4f46e5', width=3)))
 if 'ローン残高' in show_options:
@@ -377,10 +421,12 @@ fig.update_layout(
 )
 st.plotly_chart(fig, use_container_width=True)
 
+# 詳細データテーブル
 st.subheader("📋 年次詳細データ")
 display_cols = ['西暦', '第1子年齢', '第2子年齢', '世帯収入', '教育費合計', '養育費合計', '生活費', 'ローン返済', '収支', '総資産', 'ローン残高']
 st.dataframe(df[display_cols].style.format("{:,.0f}"), use_container_width=True)
 
+# AI診断エリア
 st.subheader("🤖 AI家計診断")
 user_api_key = st.text_input("Gemini APIキーを入力してください (診断機能を使用する場合)", type="password")
 
@@ -389,9 +435,12 @@ if st.button("AIに診断してもらう"):
         st.warning("APIキーを入力してください。")
     else:
         try:
+            # API設定
             genai.configure(api_key=user_api_key)
-            # モデル名を確実に認識される形式に変更
-            model = genai.GenerativeModel('gemini-1.5-flash-latest')
+            
+            # モデル定義: 一般的な 'gemini-1.5-flash' を指定
+            model_name = 'gemini-1.5-flash'
+            model = genai.GenerativeModel(model_name)
             
             prompt = f"""
             あなたはプロのファイナンシャルプランナーです。以下のシミュレーション結果に基づき、辛口かつ具体的なアドバイスを日本語で作成してください。
@@ -414,10 +463,27 @@ if st.button("AIに診断してもらう"):
             4. 投資・iDeCo活用の評価
             """
             
-            with st.spinner("AIが分析中..."):
+            with st.spinner(f"AI ({model_name}) が分析中..."):
                 response = model.generate_content(prompt)
                 st.markdown(response.text)
                 
         except Exception as e:
-            st.error(f"エラーが発生しました: {e}")
-            st.info("ヒント: requirements.txt に 'google-generativeai>=0.7.0' が指定されているか確認してください。")
+            st.error("エラーが発生しました。以下を確認してください。")
+            st.code(str(e))
+            
+            # 診断用: 実際に利用可能なモデル一覧を取得・表示する
+            st.info("💡 ヒント: あなたのAPIキーで利用可能なモデル一覧を調査します...")
+            try:
+                available_models = []
+                for m in genai.list_models():
+                    if 'generateContent' in m.supported_generation_methods:
+                        available_models.append(m.name)
+                
+                if available_models:
+                    st.write("**現在利用可能なモデル名:**")
+                    st.code("\n".join(available_models))
+                    st.write("もし 'gemini-1.5-flash' が含まれていない場合は、上記リストにある名前（例: 'models/gemini-1.5-flash-001' 等）をコード内の 'model_name' にコピーして修正してください。")
+                else:
+                    st.warning("利用可能なモデルが見つかりませんでした。APIキーが正しいか確認してください。")
+            except Exception as e2:
+                st.error(f"モデル一覧の取得にも失敗しました: {e2}")
