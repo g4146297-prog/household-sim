@@ -68,7 +68,7 @@ LIVING_PRESETS = {
 INFLATION_PRESETS = {'0% (ゼロ)': 0.00, '1% (低め)': 0.01, '2% (標準)': 0.02, '3% (高め)': 0.03}
 MORTGAGE_RATE_SCENARIOS = {'固定 (変動なし)': 'fixed', '安定 (±微減)': 'stable', '緩やか上昇 (+0.05%/年)': 'rising', '急上昇 (+0.2%/年)': 'sharp_rising'}
 
-# 為替シナリオ定義 (年間変動率)
+# 為替シナリオ定義
 FX_SCENARIOS = {
     '📈 円安トレンド (米ドル価値 +1.0%/年)': 0.01,
     '➡️ 為替横ばい (±0%/年)': 0.00,
@@ -102,7 +102,8 @@ with col1:
     c1_year = st.number_input("第1子 誕生年", value=2025, step=1)
 with col2:
     c1_month = st.number_input("第1子 誕生月", value=2, min_value=1, max_value=12)
-c1_edu = st.sidebar.selectbox("第1子 教育コース", list(EDUCATION_COSTS.keys()), index=2)
+# 初期値変更: index 8 = 【I】小学校から私立(理系大)
+c1_edu = st.sidebar.selectbox("第1子 教育コース", list(EDUCATION_COSTS.keys()), index=8)
 c1_boarding = st.sidebar.checkbox("第1子 大学は下宿(仕送り)", value=False)
 
 has_child2 = st.sidebar.checkbox("第2子を含める", value=False)
@@ -126,10 +127,12 @@ else:
 
 # 2. 収入・生活費・定年
 st.sidebar.header("👛 2. 収入・定年設定")
-head_age = st.sidebar.number_input("世帯主 現在年齢", value=35, step=1)
+# 初期値変更: 38歳
+head_age = st.sidebar.number_input("世帯主 現在年齢", value=38, step=1)
 income_preset_key = st.sidebar.selectbox("世帯主収入シナリオ", list(INCOME_PRESETS.keys()), index=1)
 income_preset = INCOME_PRESETS[income_preset_key]
-head_income_base = st.sidebar.number_input("世帯主 現在年収 (万円)", value=income_preset['base'], step=10)
+# 初期値変更: 1050万円
+head_income_base = st.sidebar.number_input("世帯主 現在年収 (万円)", value=1050, step=10)
 head_income_growth = st.sidebar.number_input("世帯主 昇給率 (%/年)", value=income_preset['growth'], step=0.1)
 
 st.sidebar.markdown("##### 👴 定年・再雇用")
@@ -145,7 +148,8 @@ st.sidebar.markdown("---")
 partner_income = st.sidebar.number_input("パートナー現在年収 (万円)", value=0, step=10)
 
 st.sidebar.markdown("---")
-living_preset_key = st.sidebar.selectbox("生活費 (住居費別)", list(LIVING_PRESETS.keys()), index=1)
+# 初期値変更: index 2 = 【C】ゆとり (月48万)
+living_preset_key = st.sidebar.selectbox("生活費 (住居費別)", list(LIVING_PRESETS.keys()), index=2)
 living_cost_base = st.sidebar.number_input("年間生活費 (万円)", value=LIVING_PRESETS[living_preset_key], step=10)
 fixed_cost_housing = st.sidebar.number_input("固定資産税・維持費 (年額)", value=19.2, step=0.1)
 inflation_key = st.sidebar.selectbox("物価上昇率", list(INFLATION_PRESETS.keys()), index=2)
@@ -165,16 +169,17 @@ mortgage_rate_scenario = MORTGAGE_RATE_SCENARIOS[st.sidebar.selectbox("金利変
 
 # 4. 資産・運用
 st.sidebar.header("💰 4. 資産・iDeCo")
-initial_cash = st.sidebar.number_input("現在の貯金 (万円)", value=380, step=10)
+# 初期値変更: 330万円
+initial_cash = st.sidebar.number_input("現在の貯金 (万円)", value=330, step=10)
 safety_net_val = st.sidebar.number_input("生活防衛資金 (万円)", value=300, step=10)
 
 st.sidebar.markdown("##### 🌍 投資資産 (リスク別)")
-# 国内資産
-initial_invest_yen = st.sidebar.number_input("国内資産 (為替リスクなし)", value=200, step=10, help="日本国債、国内預金など円建ての資産")
+# 初期値変更: 360万円
+initial_invest_yen = st.sidebar.number_input("国内資産 (為替リスクなし)", value=360, step=10, help="日本国債、国内預金など円建ての資産")
 yield_yen = st.sidebar.number_input("国内資産 年利回り (%)", value=0.5, step=0.1)
 
-# 外国資産
-initial_invest_foreign = st.sidebar.number_input("外国資産 (為替リスクあり)", value=1620, step=10, help="米国株(S&P500)、オルカンなど外貨建て資産（現在の円評価額）")
+# 初期値変更: 2287万円
+initial_invest_foreign = st.sidebar.number_input("外国資産 (為替リスクあり)", value=2287, step=10, help="米国株(S&P500)、オルカンなど外貨建て資産（現在の円評価額）")
 yield_foreign = st.sidebar.number_input("外国資産 年利回り(株価成長) (%)", value=5.0, step=0.1)
 fx_scenario_key = st.sidebar.selectbox("為替リスクシナリオ", list(FX_SCENARIOS.keys()))
 fx_change_rate = FX_SCENARIOS[fx_scenario_key]
@@ -187,7 +192,8 @@ else:
     foreign_allocation = 0
 
 st.sidebar.markdown("---")
-initial_ideco = st.sidebar.number_input("iDeCo残高 (万円)", value=180, step=10)
+# 初期値変更: 190万円
+initial_ideco = st.sidebar.number_input("iDeCo残高 (万円)", value=190, step=10)
 ideco_monthly = st.sidebar.number_input("iDeCo 毎月掛金 (万円)", value=3.0, step=0.1)
 ideco_yield = st.sidebar.number_input("iDeCo 年利回り (%)", value=3.0, step=0.1)
 
@@ -308,47 +314,34 @@ for i, year in enumerate(years):
     cash_flow = income - spending - ideco_add
     
     # --- 資産運用 (成長) ---
-    # 国内資産成長
     current_invest_yen *= (1 + yield_yen / 100)
-    
-    # 外国資産成長 (株価成長 + 為替変動)
-    # (1 + 株価成長率) * (1 + 為替変動率) - 1 がトータルの変動率
     combined_foreign_yield = (1 + yield_foreign / 100) * (1 + fx_change_rate) - 1
     current_invest_foreign *= (1 + combined_foreign_yield)
     
     current_cash += cash_flow
     
-    # --- 生活防衛資金ロジック (取り崩し・積立) ---
+    # --- 生活防衛資金ロジック ---
     total_invest = current_invest_yen + current_invest_foreign
     
     if current_cash < safety_net_amount:
-        # 資金不足 -> 投資取り崩し (割合に応じて按分して取り崩す)
         deficit = safety_net_amount - current_cash
-        
         if total_invest >= deficit:
-            # 投資で賄える場合
             if total_invest > 0:
                 ratio_yen = current_invest_yen / total_invest
                 ratio_foreign = current_invest_foreign / total_invest
-                
                 current_invest_yen -= deficit * ratio_yen
                 current_invest_foreign -= deficit * ratio_foreign
-            
             current_cash += deficit
         else:
-            # 投資を全額売却しても足りない
             current_cash += total_invest
             current_invest_yen = 0
             current_invest_foreign = 0
-            
             if current_cash < 0 and bankrupt_year is None:
                 bankrupt_year = year
                 
     elif current_cash > safety_net_amount and invest_surplus:
-        # 資金余剰 -> 投資へ (配分比率に従って追加)
         surplus = current_cash - safety_net_amount
         current_cash = safety_net_amount
-        
         alloc_ratio = foreign_allocation / 100.0
         current_invest_foreign += surplus * alloc_ratio
         current_invest_yen += surplus * (1 - alloc_ratio)
@@ -411,7 +404,6 @@ fig.add_trace(go.Scatter(x=df['西暦'], y=df['iDeCo'], name='うちiDeCo', line
 fig.add_trace(go.Scatter(x=df['西暦'], y=df['貯金'], name='うち貯金', line=dict(color='#93c5fd', width=1), stackgroup='one', hovertemplate='%{y:,.0f}万円'))
 fig.add_trace(go.Scatter(x=df['西暦'], y=df['ローン残高'], name='ローン残高', line=dict(color='#ef4444', dash='dot', width=2), hovertemplate='%{y:,.0f}万円'))
 
-# X軸ラベル
 tick_vals = []
 tick_text = []
 for index, row in df.iterrows():
@@ -465,7 +457,7 @@ if st.button("家計診断を実行する") and user_api_key:
         # ユーザー属性
         - 世帯主: {head_age}歳, 年収{head_income_base}万 (定年{retirement_age}歳/再雇用率{reemploy_ratio}%)
         - 子供: 第1子{c1_year}年生まれ({c1_edu}) / 仕送り{boarding_status}
-        - 資産: 貯金{initial_cash}万, 国内投資{initial_invest_yen}万, 外国投資{initial_invest_foreign}万, iDeCo{initial_ideco}万
+        - 資産: 貯金{initial_cash}万 (防衛資金{safety_net_val}万設定), 国内投資{initial_invest_yen}万, 外国投資{initial_invest_foreign}万, iDeCo{initial_ideco}万
         - 為替リスク: {fx_scenario_key}
         
         # シミュレーション結果
