@@ -7,7 +7,7 @@ import datetime
 
 # --- ページ設定 ---
 st.set_page_config(
-    page_title="将来家計シミュレーション (定年対応版)",
+    page_title="将来家計シミュレーション (為替リスク対応版)",
     layout="wide",
     initial_sidebar_state="expanded"
 )
@@ -68,6 +68,14 @@ LIVING_PRESETS = {
 INFLATION_PRESETS = {'0% (ゼロ)': 0.00, '1% (低め)': 0.01, '2% (標準)': 0.02, '3% (高め)': 0.03}
 MORTGAGE_RATE_SCENARIOS = {'固定 (変動なし)': 'fixed', '安定 (±微減)': 'stable', '緩やか上昇 (+0.05%/年)': 'rising', '急上昇 (+0.2%/年)': 'sharp_rising'}
 
+# 為替シナリオ定義 (年間変動率)
+FX_SCENARIOS = {
+    '📈 円安トレンド (米ドル価値 +1.0%/年)': 0.01,
+    '➡️ 為替横ばい (±0%/年)': 0.00,
+    '📉 緩やかな円高 (米ドル価値 -1.0%/年)': -0.01,
+    '⏬ 急速な円高 (米ドル価値 -2.5%/年)': -0.025,
+}
+
 # --- 関数定義 ---
 def get_rate_fluctuation(scenario, current_base_rate):
     if scenario == 'fixed': return current_base_rate
@@ -125,16 +133,16 @@ head_income_base = st.sidebar.number_input("世帯主 現在年収 (万円)", va
 head_income_growth = st.sidebar.number_input("世帯主 昇給率 (%/年)", value=income_preset['growth'], step=0.1)
 
 st.sidebar.markdown("##### 👴 定年・再雇用")
-retirement_age = st.sidebar.number_input("定年年齢", value=60, step=1, help="この年齢で給与がリセット(再雇用)されます")
-reemploy_ratio = st.sidebar.slider("再雇用時の年収掛目(%)", 30, 100, 60, help="定年直前の年収の何%になるか")
-retire_completely_age = st.sidebar.number_input("完全リタイア年齢", value=65, step=1, help="この年齢以降、労働収入は0になります")
+retirement_age = st.sidebar.number_input("定年年齢", value=60, step=1)
+reemploy_ratio = st.sidebar.slider("再雇用時の年収掛目(%)", 30, 100, 60)
+retire_completely_age = st.sidebar.number_input("完全リタイア年齢", value=65, step=1)
 
 st.sidebar.markdown("##### 💴 年金")
 pension_start_age = st.sidebar.number_input("年金受給開始年齢", value=65, step=1)
-pension_amount = st.sidebar.number_input("世帯の年金受給額(年額)", value=240, step=10, help="夫婦2人の標準的な受給額目安: 230~260万円")
+pension_amount = st.sidebar.number_input("世帯の年金受給額(年額)", value=240, step=10)
 
 st.sidebar.markdown("---")
-partner_income = st.sidebar.number_input("パートナー現在年収 (万円)", value=0, step=10, help="パートナーは現状一定として計算されます")
+partner_income = st.sidebar.number_input("パートナー現在年収 (万円)", value=0, step=10)
 
 st.sidebar.markdown("---")
 living_preset_key = st.sidebar.selectbox("生活費 (住居費別)", list(LIVING_PRESETS.keys()), index=1)
@@ -158,10 +166,25 @@ mortgage_rate_scenario = MORTGAGE_RATE_SCENARIOS[st.sidebar.selectbox("金利変
 # 4. 資産・運用
 st.sidebar.header("💰 4. 資産・iDeCo")
 initial_cash = st.sidebar.number_input("現在の貯金 (万円)", value=380, step=10)
-safety_net_val = st.sidebar.number_input("生活防衛資金 (万円)", value=300, step=10, help="この金額は投資に回さず、現金として確保します。")
-initial_invest = st.sidebar.number_input("現在の投資 (万円)", value=1820, step=10)
-invest_yield = st.sidebar.number_input("投資(NISA) 年利回り (%)", value=3.0, step=0.1)
+safety_net_val = st.sidebar.number_input("生活防衛資金 (万円)", value=300, step=10)
+
+st.sidebar.markdown("##### 🌍 投資資産 (リスク別)")
+# 国内資産
+initial_invest_yen = st.sidebar.number_input("国内資産 (為替リスクなし)", value=200, step=10, help="日本国債、国内預金など円建ての資産")
+yield_yen = st.sidebar.number_input("国内資産 年利回り (%)", value=0.5, step=0.1)
+
+# 外国資産
+initial_invest_foreign = st.sidebar.number_input("外国資産 (為替リスクあり)", value=1620, step=10, help="米国株(S&P500)、オルカンなど外貨建て資産（現在の円評価額）")
+yield_foreign = st.sidebar.number_input("外国資産 年利回り(株価成長) (%)", value=5.0, step=0.1)
+fx_scenario_key = st.sidebar.selectbox("為替リスクシナリオ", list(FX_SCENARIOS.keys()))
+fx_change_rate = FX_SCENARIOS[fx_scenario_key]
+
+st.sidebar.markdown("---")
 invest_surplus = st.sidebar.checkbox("生活防衛資金を超える黒字を投資に回す", value=True)
+if invest_surplus:
+    foreign_allocation = st.sidebar.slider("黒字分の外国資産(リスク資産)への配分(%)", 0, 100, 100, help="将来の積立をどちらに振るか。100%なら全額外国株(NISA等)、0%なら全額国内資産へ。")
+else:
+    foreign_allocation = 0
 
 st.sidebar.markdown("---")
 initial_ideco = st.sidebar.number_input("iDeCo残高 (万円)", value=180, step=10)
@@ -172,7 +195,7 @@ ideco_yield = st.sidebar.number_input("iDeCo 年利回り (%)", value=3.0, step=
 start_year = 2025
 last_child_grad_year = c1_year + 23
 if has_child2: last_child_grad_year = max(last_child_grad_year, c2_year + 23)
-end_year = max(start_year + 45, last_child_grad_year) # 老後まで見たいので期間延長
+end_year = max(start_year + 45, last_child_grad_year) 
 years = list(range(start_year, end_year + 1))
 
 df = pd.DataFrame(index=years)
@@ -182,31 +205,23 @@ df['世帯主年齢'] = head_age + df['経過年数']
 df['第1子年齢'] = df['西暦'] - c1_year
 df['第2子年齢'] = (df['西暦'] - c2_year) if has_child2 else np.nan
 
-# --- 収入計算ロジック(定年対応) ---
+# 収入計算
 head_incomes = []
 pension_incomes = []
-peak_income = 0 # 定年直前の年収を記録
+peak_income = 0 
 
 for i, year in enumerate(years):
     age = df['世帯主年齢'].iloc[i]
-    
-    # 1. 現役期間 (定年前)
     if age < retirement_age:
         inc = head_income_base * (1 + head_income_growth / 100) ** i
         head_incomes.append(inc)
-        peak_income = inc # 更新し続ける
-    
-    # 2. 再雇用期間 (定年〜完全リタイアまで)
+        peak_income = inc 
     elif age < retire_completely_age:
-        # 定年直前の年収 × 再雇用率
         inc = peak_income * (reemploy_ratio / 100)
         head_incomes.append(inc)
-        
-    # 3. 完全リタイア後
     else:
         head_incomes.append(0)
 
-    # 年金
     if age >= pension_start_age:
         pension_incomes.append(pension_amount)
     else:
@@ -231,7 +246,8 @@ df['支出計(ローン除)'] = df['教育費'] + df['養育費'] + df['仕送�
 
 # 資産計算
 current_cash = initial_cash * 10000
-current_invest = initial_invest * 10000
+current_invest_yen = initial_invest_yen * 10000
+current_invest_foreign = initial_invest_foreign * 10000
 current_ideco = initial_ideco * 10000
 current_loan_balance = mortgage_principal * 10000
 current_base_rate = mortgage_base_rate
@@ -254,7 +270,7 @@ for _ in range(months_before):
             current_loan_balance -= (payment - interest)
             total_months -= 1
 
-cash_hist, invest_hist, ideco_hist, loan_hist, payment_hist, balance_hist = [], [], [], [], [], []
+cash_hist, invest_yen_hist, invest_foreign_hist, ideco_hist, loan_hist, payment_hist, balance_hist = [], [], [], [], [], [], []
 bankrupt_year = None
 min_assets_val = float('inf')
 min_assets_year = start_year
@@ -291,54 +307,79 @@ for i, year in enumerate(years):
     spending = df['支出計(ローン除)'].iloc[i] * 10000 + annual_payment
     cash_flow = income - spending - ideco_add
     
-    # 資産計算 (順序: 投資利回り -> 現金増減 -> リバランス)
-    invest_gain = current_invest * (invest_yield / 100)
-    current_invest += invest_gain
+    # --- 資産運用 (成長) ---
+    # 国内資産成長
+    current_invest_yen *= (1 + yield_yen / 100)
+    
+    # 外国資産成長 (株価成長 + 為替変動)
+    # (1 + 株価成長率) * (1 + 為替変動率) - 1 がトータルの変動率
+    combined_foreign_yield = (1 + yield_foreign / 100) * (1 + fx_change_rate) - 1
+    current_invest_foreign *= (1 + combined_foreign_yield)
     
     current_cash += cash_flow
     
-    # 生活防衛資金ロジック
+    # --- 生活防衛資金ロジック (取り崩し・積立) ---
+    total_invest = current_invest_yen + current_invest_foreign
+    
     if current_cash < safety_net_amount:
+        # 資金不足 -> 投資取り崩し (割合に応じて按分して取り崩す)
         deficit = safety_net_amount - current_cash
-        if current_invest >= deficit:
-            current_invest -= deficit
+        
+        if total_invest >= deficit:
+            # 投資で賄える場合
+            if total_invest > 0:
+                ratio_yen = current_invest_yen / total_invest
+                ratio_foreign = current_invest_foreign / total_invest
+                
+                current_invest_yen -= deficit * ratio_yen
+                current_invest_foreign -= deficit * ratio_foreign
+            
             current_cash += deficit
         else:
-            current_cash += current_invest
-            current_invest = 0
+            # 投資を全額売却しても足りない
+            current_cash += total_invest
+            current_invest_yen = 0
+            current_invest_foreign = 0
+            
             if current_cash < 0 and bankrupt_year is None:
                 bankrupt_year = year
                 
     elif current_cash > safety_net_amount and invest_surplus:
+        # 資金余剰 -> 投資へ (配分比率に従って追加)
         surplus = current_cash - safety_net_amount
         current_cash = safety_net_amount
-        current_invest += surplus
+        
+        alloc_ratio = foreign_allocation / 100.0
+        current_invest_foreign += surplus * alloc_ratio
+        current_invest_yen += surplus * (1 - alloc_ratio)
 
-    total_assets = current_cash + current_invest + current_ideco
+    total_assets = current_cash + current_invest_yen + current_invest_foreign + current_ideco
     if total_assets < min_assets_val:
         min_assets_val = total_assets
         min_assets_year = year
 
     cash_hist.append(current_cash / 10000)
-    invest_hist.append(current_invest / 10000)
+    invest_yen_hist.append(current_invest_yen / 10000)
+    invest_foreign_hist.append(current_invest_foreign / 10000)
     ideco_hist.append(current_ideco / 10000)
     loan_hist.append(current_loan_balance / 10000)
     payment_hist.append(annual_payment / 10000)
     balance_hist.append((income - spending - ideco_add)/10000)
 
 df['貯金'] = cash_hist
-df['投資'] = invest_hist
+df['投資(国内)'] = invest_yen_hist
+df['投資(外国)'] = invest_foreign_hist
 df['iDeCo'] = ideco_hist
 df['ローン残高'] = loan_hist
 df['ローン返済'] = payment_hist
 df['年間収支'] = balance_hist
-df['総資産'] = df['貯金'] + df['投資'] + df['iDeCo']
+df['総資産'] = df['貯金'] + df['投資(国内)'] + df['投資(外国)'] + df['iDeCo']
 df['純資産'] = df['総資産'] - df['ローン残高']
 df['教育・養育・仕送り'] = df['教育費'] + df['養育費'] + df['仕送り']
 
 # --- 表示 ---
 st.title("将来家計シミュレーション 📊")
-st.markdown("定年後の収入減や年金を考慮し、教育費ピークと老後資金の安全性を確認します。")
+st.markdown("定年、年金、為替リスクを考慮した詳細シミュレーション")
 
 # KPI
 total_child_cost = df['教育・養育・仕送り'].sum()
@@ -364,12 +405,13 @@ st.caption("マウスを合わせると、年齢と金額(万円)が確認でき
 
 fig = go.Figure()
 fig.add_trace(go.Scatter(x=df['西暦'], y=df['総資産'], name='<b>総資産</b>', line=dict(color='#2563eb', width=4), hovertemplate='%{y:,.0f}万円'))
-fig.add_trace(go.Scatter(x=df['西暦'], y=df['投資'], name='うち投資(NISA)', line=dict(color='#10b981', width=1), stackgroup='one', hovertemplate='%{y:,.0f}万円'))
+fig.add_trace(go.Scatter(x=df['西暦'], y=df['投資(外国)'], name='うち外国資産(リスクあり)', line=dict(color='#10b981', width=1), stackgroup='one', hovertemplate='%{y:,.0f}万円'))
+fig.add_trace(go.Scatter(x=df['西暦'], y=df['投資(国内)'], name='うち国内資産(リスクなし)', line=dict(color='#34d399', width=1), stackgroup='one', hovertemplate='%{y:,.0f}万円'))
 fig.add_trace(go.Scatter(x=df['西暦'], y=df['iDeCo'], name='うちiDeCo', line=dict(color='#f59e0b', width=1), stackgroup='one', hovertemplate='%{y:,.0f}万円'))
 fig.add_trace(go.Scatter(x=df['西暦'], y=df['貯金'], name='うち貯金', line=dict(color='#93c5fd', width=1), stackgroup='one', hovertemplate='%{y:,.0f}万円'))
 fig.add_trace(go.Scatter(x=df['西暦'], y=df['ローン残高'], name='ローン残高', line=dict(color='#ef4444', dash='dot', width=2), hovertemplate='%{y:,.0f}万円'))
 
-# X軸のラベル作成 (5年ごと、年齢表示)
+# X軸ラベル
 tick_vals = []
 tick_text = []
 for index, row in df.iterrows():
@@ -378,12 +420,7 @@ for index, row in df.iterrows():
         tick_text.append(f"{row['西暦']}<br>(主{int(row['世帯主年齢'])}/子{int(row['第1子年齢'])})")
 
 fig.update_layout(
-    xaxis=dict(
-        title="西暦 (世帯主年齢/第1子年齢)",
-        tickmode='array',
-        tickvals=tick_vals,
-        ticktext=tick_text
-    ),
+    xaxis=dict(title="西暦 (世帯主年齢/第1子年齢)", tickmode='array', tickvals=tick_vals, ticktext=tick_text),
     yaxis_title="金額 (万円)",
     hovermode="x unified",
     legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
@@ -392,10 +429,10 @@ st.plotly_chart(fig, use_container_width=True)
 
 # データテーブル
 with st.expander("詳細データを見る"):
-    display_cols = ['西暦', '世帯主年齢', '第1子年齢', '世帯収入', '教育・養育・仕送り', '年間収支', '総資産', '貯金', '投資', 'ローン残高']
+    display_cols = ['西暦', '世帯主年齢', '第1子年齢', '世帯収入', '教育・養育・仕送り', '年間収支', '総資産', '貯金', '投資(国内)', '投資(外国)', 'ローン残高']
     st.dataframe(df[display_cols].style.format("{:,.0f}"), use_container_width=True)
 
-# 参考データ表示
+# 参考データ
 st.markdown("### 【参考】教育費・養育費の前提データ (年額: 万円)")
 col_ref1, col_ref2 = st.columns(2)
 with col_ref1:
@@ -428,17 +465,18 @@ if st.button("家計診断を実行する") and user_api_key:
         # ユーザー属性
         - 世帯主: {head_age}歳, 年収{head_income_base}万 (定年{retirement_age}歳/再雇用率{reemploy_ratio}%)
         - 子供: 第1子{c1_year}年生まれ({c1_edu}) / 仕送り{boarding_status}
-        - 現在資産: 貯金{initial_cash}万 (防衛資金{safety_net_val}万設定), 投資{initial_invest}万, iDeCo{initial_ideco}万
-
+        - 資産: 貯金{initial_cash}万, 国内投資{initial_invest_yen}万, 外国投資{initial_invest_foreign}万, iDeCo{initial_ideco}万
+        - 為替リスク: {fx_scenario_key}
+        
         # シミュレーション結果
         - 教育・養育費総額: {total_child_cost:,.0f}万円
         - 最も苦しい時期: {min_assets_year}年 (資産残高 {min_assets_disp:,.0f}万円)
         - 老後純資産(最終): {final_net_assets:,.0f}万円
         
         # アドバイスのポイント
-        1. 定年後の収入減と教育費負担の重なりについて
-        2. 老後資金の十分性（年金生活への移行）
-        3. 生活防衛資金の設定額は適切か
+        1. 定年後の収入減と教育費負担の重なり
+        2. 為替リスク（円高シナリオ等）による資産目減りの影響度
+        3. 老後資金の十分性
         
         簡潔に3点にまとめてください。
         """
